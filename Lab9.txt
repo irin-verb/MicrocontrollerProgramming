@@ -1,0 +1,176 @@
+#include "MDR32F9Qx_port.h"        // Библиотека работы с портами
+#include "MDR32F9Qx_rst_clk.h"     // Библиотека работы с модулем тактирования
+#include "mlt_lcd.h"               // Библиотека работы с дисплеем
+#include "math.h"
+
+// структура инициализации порта
+PORT_InitTypeDef PortStruct;
+
+void LCDPins(void) // процедура инициализации выводов МК для работы с LCD
+{ // все линии цифровые в режиме PORT с медленным фронтом
+    // линии DB5:DB0 - PA5:PA0 по умолчанию ввод без подтяжек и фильтров
+    PortStruct.PORT_Pin = PORT_Pin_0|PORT_Pin_1|PORT_Pin_2|PORT_Pin_3|PORT_Pin_4|PORT_Pin_5;
+    PortStruct.PORT_OE = PORT_OE_IN;
+    PortStruct.PORT_FUNC = PORT_FUNC_PORT;
+    PortStruct.PORT_SPEED = PORT_SPEED_SLOW;
+    PortStruct.PORT_MODE = PORT_MODE_DIGITAL;
+    PORT_Init(MDR_PORTA,&PortStruct);
+    // линии DB7:DB6 - PF3:PF2 по умолчанию ввод без подтяжек и фильтров
+    PortStruct.PORT_Pin = PORT_Pin_2|PORT_Pin_3;
+    PORT_Init(MDR_PORTF,&PortStruct);
+    // линии E1 - PB7, E2 - PB8, RES - PB9, R/~W - PB10 вывод
+    PortStruct.PORT_OE = PORT_OE_OUT;
+    PortStruct.PORT_Pin = PORT_Pin_7|PORT_Pin_8|PORT_Pin_9|PORT_Pin_10;
+    PORT_Init(MDR_PORTB,&PortStruct);
+    // Линии A0 - PC0, E - PC1 вывод
+    PortStruct.PORT_Pin = PORT_Pin_0|PORT_Pin_1;
+    PORT_Init(MDR_PORTC,&PortStruct);
+}
+
+void CPUinit(void) // процедура инициализации внешнего тактового генератора для процессора
+{
+    // включение внешнего высокочастотного генератора
+    RST_CLK_HSEconfig(RST_CLK_HSE_ON);
+    // запрос состояния, только если готов, то переход к следующим действиям
+    while (RST_CLK_HSEstatus()!=SUCCESS);
+    // включение модуля PLL
+    RST_CLK_CPU_PLLcmd(ENABLE);
+    // умножение частоты кварцевого генератора в 6 раз
+    RST_CLK_CPU_PLLconfig(RST_CLK_CPU_PLLsrcHSEdiv1, RST_CLK_CPU_PLLmul6);
+    // запрос состояния PLL, если готов, то переход к следующим действиям
+    while (RST_CLK_CPU_PLLstatus()!=SUCCESS);    
+    // переключение на частоту сформированную PLL
+    RST_CLK_CPU_PLLuse(ENABLE);
+    RST_CLK_CPUclkPrescaler(RST_CLK_CPUclkDIV1);
+    // переключение на тактовый сигнал CPU_C3
+    RST_CLK_CPUclkSelection(RST_CLK_CPUclkCPU_C3);
+}
+
+void PCLKinit(void) // процедура тактирования портов
+{
+    RST_CLK_PCLKcmd(RST_CLK_PCLK_PORTA,ENABLE); // включение тактирования PORTA
+    RST_CLK_PCLKcmd(RST_CLK_PCLK_PORTB,ENABLE); // включение тактирования PORTB
+    RST_CLK_PCLKcmd(RST_CLK_PCLK_PORTC,ENABLE); // включение тактирования PORTC
+    RST_CLK_PCLKcmd(RST_CLK_PCLK_PORTF,ENABLE); // включение тактирования PORTF
+}
+
+void LCDStart(void) // процедура запуска дисплея
+{
+    uint8_t status; // переменная для анализа состояния чипа
+    LcdInit(); // установка сигнала перезагрузки, ожидание завершения операции
+    do 
+    {
+        status = ReadStatus(1); // чтение состояния первого чипа
+    } while ((status & 0x80) != 0x00); // пока не готов снова прочитать состояние
+    do
+    {
+        status = ReadStatus(2); // чтение состояния второго чипа
+    } while ((status & 0x80) != 0x00); // пока не готов снова прочитать состояние
+    DispOn(1); // включение чипа 1
+    DispOn(2); // включение чипа 2    
+    LcdClearChip(1); // очистка чипа 1
+    LcdClearChip(2); // очистка чипа 2
+}
+
+void LCDTestPrint(void)
+{
+    SetPage(1, 2);          // Установить 2 страницу 1-го чипа
+    SetAdress(1, 5);        // Установить адрес - 5, для 1-го чипа (2 страницы)
+    WriteData(1, 0x20);     // Вывод на экран точки с положением 0x20 (по адресу 5, 2 страницы, чип 1)
+    SetPage(2, 3);          // Установить 3 страницу 2-го чипа
+    SetAdress(2, 0);        // Установить адрес - 0, для 2-го чипа (3 страницы)
+    for (int i = 0; i < 7; i++)  // Перебор комбинаций от 0 до 7
+    {
+        WriteData(2, i);    // Вывод на экран точки с положением i, адрес увеличивается на 1 после выполнения каждой команды
+    }
+    SetPage(2, 4);          // Установить 4 страницу 2-го чипа
+    SetAdress(2, 0);        // Установить адрес - 0, для 2-го чипа (4 страницы)
+    for (int i = 0; i < 63; i++) // Перебор комбинаций от 0 до 63
+    {
+        WriteData(2, i);    // Вывод на экран точки с положением i, адрес увеличивается на 1 после выполнения каждой команды
+    }
+}
+
+
+
+
+
+
+
+// Задание 2
+void LCDPrintPointByCoords(uint8_t x, uint8_t y)
+{
+		uint8_t chip;     // Чип: 1 или 2
+    uint8_t page;     // Номер страницы (0–7)
+    uint8_t address;  // Адрес по оси x (0–63)
+    uint8_t data;     // Значение для записи в указанный адрес
+	
+    // Определение чипа и адреса
+    if (x < 64)
+		{
+        chip = 1;
+        address = x;
+    }
+		else
+		{
+        chip = 2;
+        address = x - 64;
+    }
+    // Определение страницы
+    page = y / 8;
+    // Определение значения
+    data = 1 << (y % 8);
+
+    SetPage(chip, page);          
+    SetAdress(chip, address);        
+    WriteData(chip, data);     
+}
+
+
+
+
+
+
+
+// Задание 3
+void LCDPrintAxes(void)
+{
+		for (uint8_t y; y < 64; y++)
+		{
+				LCDPrintPointByCoords(63, y);
+		}
+		
+		for (uint8_t x; x < 128; x++)
+		{
+				LCDPrintPointByCoords(x, 31);
+		}
+}
+
+// Задание 4
+uint8_t y(uint8_t x)
+{
+	  return -(30 * sin(x * 3.14/32)) + 31;
+}
+
+void LCDPrintFunction(void)
+{
+	  LCDPrintAxes();
+	
+	  for (uint8_t x; x < 128; x++)
+		{
+				LCDPrintPointByCoords(x, y(x));
+		}
+}
+
+int main(void)
+{
+    CPUinit();      // Инициализация тактирования процессора
+    PCLKinit();     // Инициализация тактирования портов
+    LCDPins();      // Настройка портов для работы с LCD
+    LCDStart();     // Запуск LCD-дисплея
+    LCDTestPrint(); // Тестовая печать на LCD
+    while (1)
+    {
+        
+    }
+}
